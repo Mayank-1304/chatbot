@@ -9,6 +9,7 @@ load_dotenv()
 
 # Configuration
 # This should be your ngrok URL (e.g., https://xyz.ngrok-free.app)
+# Locally, it will use your .env file. On Cloud, it will use Streamlit Secrets.
 BACKEND_URL = os.getenv("BACKEND_URL")
 
 # --- PAGE CONFIG ---
@@ -41,8 +42,25 @@ def process_chat():
         full_response = ""
         
         try:
-            # LangGraph API expects a thread-based stream
-            # The Assistant ID is "agent" as defined in langgraph.json
+            # headers to bypass ngrok browser warning
+            headers = {"ngrok-skip-browser-warning": "true"}
+
+            # 1. Ensure the thread exists on the server
+            if "thread_verified" not in st.session_state:
+                thread_url = f"{BACKEND_URL}/threads"
+                thread_payload = {"thread_id": st.session_state.thread_id}
+                try:
+                    t_res = requests.post(thread_url, json=thread_payload, headers=headers, timeout=10)
+                    if t_res.status_code in [200, 201, 409]:
+                        st.session_state.thread_verified = True
+                    else:
+                        st.error(f"❌ Failed to initialize Thread: {t_res.text}")
+                        return
+                except Exception as e:
+                    st.error(f"⚠️ Could not connect to backend to create thread: {e}")
+                    return
+
+            # 2. Run the stream
             url = f"{BACKEND_URL}/threads/{st.session_state.thread_id}/runs/stream"
             payload = {
                 "assistant_id": "agent",
@@ -50,8 +68,7 @@ def process_chat():
                 "stream_mode": "values"
             }
             
-            # Use a timeout of 60 seconds for larger outputs
-            with requests.post(url, json=payload, stream=True, timeout=60) as response:
+            with requests.post(url, json=payload, headers=headers, stream=True, timeout=60) as response:
                 if response.status_code != 200:
                     st.error(f"❌ API Error {response.status_code}: {response.text}")
                     return
