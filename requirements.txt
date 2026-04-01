@@ -1,7 +1,8 @@
-langgraph
-langchain-google-genai
-langchain-core
-python-dotenv
-firecrawl-py
-playwright
-chainlit
+langgraph>=0.2.0
+langchain-google-genai>=1.0.0
+langchain-core>=0.2.0
+python-dotenv>=1.0.0
+playwright>=1.40.0
+streamlit>=1.30.0
+pymongo>=4.6.0
+requests>=2.31.0

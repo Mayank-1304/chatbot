@@ -1,52 +1,86 @@
-# The Meat Story AI Bot
+# 🥩 The Meat Story | AI Butcher's Buddy
 
-An AI assistant for "The Meat Story" utilizing a LangGraph workflow and Google's Gemini 2.0 Flash model. It answers customer queries regarding products and prices after dynamically scraping the data from the website.
+A high-end AI concierge and order-management system for **The Meat Story**, built with **LangGraph** and powered by **Google Gemini 2.0 Flash**. 
 
-## Features
-- **Site Scraping Tooling**: 
-  - `extract_prices.py` uses Playwright to systematically extract product details and pricing into a central knowledge base.
-  - `scrape_site.py` uses Firecrawl to extract general shop information and merges it with the price data.
-- **LangGraph Agent**: `agent.py` establishes a Google GenAI integration representing the shop manager/agent to answer user text inputs.
-- **Interactive UI**: `ui.py` provides a beautiful chat interface powered by Chainlit.
+This isn't just a chatbot; it's a sophisticated "VIP Concierge" capable of handling complex butchery-specific business rules, dynamic pricing, and inventory-aware scheduling.
 
-## Setup Instructions
+---
 
-1. **Clone the repository.**
-2. **Setup virtual environment** (optional but recommended):
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
-3. **Install Dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   pip install chainlit # Note: required for the UI
-   playwright install chromium
-   ```
-4. **Environment Variables:**
-   - Copy `.env.example` to `.env`
-   - Fill in your `LANGSMITH_API_KEY`, `GOOGLE_API_KEY`, and `FIRECRAWL_API_KEY`.
+## ✨ Key Features
 
-## Usage
+### 🤵 VIP Concierge Persona
+Programmed with a **"Fast & Elegant"** personality. No conversational fluff—just hyper-efficient, polite service that gets the order locked in fast.
 
-1. **Update Data (Scraping):** 
-   You must run these scripts to generate and populate `meat_catalog.json`:
-   ```bash
-   # Step 1: Extract real-time product pricing and details
-   python extract_prices.py
-   
-   # Step 2: Extract general shop information and merge with catalog
-   python scrape_site.py
-   ```
+### 🧠 Intelligent Pricing Engine
+- **Per-Item Customization**: Automatically detects when a user asks for non-standard pack sizes (e.g., 100g bags) and applies a ₹50.00 customization fee *per product*.
+- **Automatic GST Calculation**: Calculates 18% GST specifically and exclusively on the customization fees.
+- **Organ Meat Promo**: Proactively upsells a 50% discount on all Organ/Muscle meats if the user orders over 500g.
 
-2. **Run the Interactive Chatbot:**
-   Launch the Chainlit UI to interact with "The Meat Story" AI on your browser:
-   ```bash
-   chainlit run ui.py -w
-   ```
-   
-3. **Use the Agent API:**
-   Alternatively, the `agent.py` file exposes a compiled LangGraph workflow. You can integrate it into your application logic by importing the `graph` or interact with it via LangGraph Studio using the `langgraph.json` configuration.
+### 🚚 Dynamic Logistics
+- **Same-Day & Next-Day Focus**: Prioritizes immediate delivery while remaining flexible for future custom dates.
+- **Capacity Management**: Features a hard limit of **30 premium orders per day** to ensure quality control.
 
-## Note on Security
-Please ensure that your `.env` file is never committed or pushed to source control (it exists in `.gitignore` already). The `.env.example` file is safe to push.
+### 🌐 Scraper-Driven Knowledge Base
+Uses **Playwright** to systematically crawl the Meat Story store, extracting real-time pricing and offers into a decoupled, offline-first `meat_catalog.json`.
+
+---
+
+## 🚀 Getting Started
+
+### 1. Prerequisites
+- Python 3.10+
+- A Google Gemini API Key
+- LangGraph CLI (optional, for dev)
+
+### 2. Installation
+```bash
+# Clone the repository
+git clone https://github.com/your-repo/meat-story-ai.git
+cd meat-story-ai
+
+# Install dependencies
+pip install -r requirements.txt
+playwright install chromium
+```
+
+### 3. Configuration
+Copy the `.env.example` file to `.env` and fill in your credentials:
+```env
+GOOGLE_API_KEY="your_key_here"
+LANGSMITH_API_KEY="optional_for_tracing"
+TEST_USER_ID="optional_mongo_user_id"
+# ...etc
+```
+
+---
+
+## 🛠️ Usage
+
+### Sync the Catalog
+To refresh the knowledge base from the live website:
+```bash
+python extract_prices.py
+```
+
+### Launch the UI
+Start the interactive Streamlit chat interface:
+```bash
+streamlit run ui_streamlit.py
+```
+
+---
+
+## 🏗️ Architecture
+
+- **Core Logic**: `agent.py` (LangGraph State Machine)
+- **Data Extraction**: `extract_prices.py` (Playwright Scraper)
+- **Frontend**: `ui_streamlit.py` (Streamlit Chat)
+- **Database**: `meat_catalog.json` (Local Storage)
+
+---
+
+## 🔒 Security
+The project uses a strict `.gitignore` to protect sensitive environment variables. Always use `.env` for API keys and database credentials.
+
+---
+*Built with ❤️ for The Meat Story.*
