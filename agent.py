@@ -15,9 +15,9 @@ from langchain_core.tools import tool
 load_dotenv()
 
 # --- 1. CONFIGURATION & TEST IDs ---
-TEST_USER_ID = os.getenv("TEST_USER_ID", "69ad32f7317cc08a84a096d1")
-TEST_ADDRESS_ID = os.getenv("TEST_ADDRESS_ID", "69c102ee9bbb4dab5eff7df4")
-TEST_PET_ID = os.getenv("TEST_PET_ID", "69c7f020104d72098655203d")
+TEST_USER_ID = os.getenv("TEST_USER_ID")
+TEST_ADDRESS_ID = os.getenv("TEST_ADDRESS_ID")
+TEST_PET_ID = os.getenv("TEST_PET_ID")
 
 # --- 2. ENHANCED TOOLS ---
 
