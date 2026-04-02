@@ -92,7 +92,12 @@ def calculate_order_details(items_requested: List[Dict[str, Any]]):
         requested_pack_size = req.get("pack_size_gm")
         
         if unit_type == "gms":
-            packs = qty_val / units_in_pack  # Support exact fractional calculations for any weight
+            packs = qty_val / units_in_pack
+            # Enforce minimum order of 5g
+            if qty_val < 5:
+                results.append({"error": f"Minimum order is 5g. You requested {qty_val}g of {item.get('title')}. Please order at least 5g."})
+                continue
+            # Custom packing applies when quantity is less than one standard pack
             if requested_pack_size and float(requested_pack_size) < units_in_pack:
                 is_customized = True
             elif qty_val < units_in_pack:
@@ -380,6 +385,13 @@ def meat_story_agent(state: MessagesState):
 
 
     5. ⚠️ NEVER HALLUCINATE PRICES: You MUST NEVER quote a subtotal, total, or calculated cost from memory or estimation. ONLY quote numbers that came directly from a 'calculate_order_details' tool call. If you haven't called the tool yet, do NOT say things like "that will be ₹520". Wait until the tool runs, then use those exact numbers.
+
+    6. ✅ ALWAYS ACCEPT SMALL ORDERS (Custom Packing Rule):
+       - Minimum order is 5g. NEVER reject any order of 5g or more.
+       - If a customer asks for LESS than the standard pack size (e.g. 50g when standard is 500g), ALWAYS accept it. Inform them: "A Custom Packing Fee of ₹50 + 18% GST (₹9) = ₹59 total will be added."
+       - NEVER say "I don't have that option" or "that size is not available" for any quantity >= 5g.
+       - Bad: "I don't have an option for 50gm. The pack is 500gm."
+       - Good: "Absolutely! 50g of Chicken Wings is possible. Since it's less than our standard 500g pack, a custom packing fee of ₹50 + ₹9 GST applies. Shall I add it to your cart?"
 
     --- ORDER WORKFLOW ---
     1. SELECTION & DISCOUNT TRIGGER: Acknowledge the item. If it's an Organ/Muscle meat, lead with the 50% bulk discount offer immediately. Ask for quantity/weight or how many packs customer wants.
