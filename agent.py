@@ -58,12 +58,34 @@ def calculate_order_details(items_requested: List[Dict[str, Any]]):
         # Parse requested quantity using regex for robustness
         qty_val = 1.0
         import re
-        nums = re.findall(r"[-+]?\d*\.\d+|\d+", requested_qty_str)
-        if nums:
-            qty_val = float(nums[0])
-            if "kg" in requested_qty_str: qty_val *= 1000
+
+        # Handle "X packs of Y kg" or "X packs of Yg" patterns first
+        # e.g. "2 packs of 1kg" = 2 * 1000g = 2000g, pack_size_gm = 1000
+        pack_of_match = re.search(r"(\d+)\s*packs?\s*of\s*(\d+\.?\d*)\s*(kg|g|gm|gms)", requested_qty_str, re.IGNORECASE)
+        if pack_of_match and unit_type == "gms":
+            num_packs = float(pack_of_match.group(1))
+            pack_size = float(pack_of_match.group(2))
+            pack_unit = pack_of_match.group(3).lower()
+            if "kg" in pack_unit:
+                pack_size *= 1000  # Convert kg to grams
+            qty_val = num_packs * pack_size
+            # Override requested_pack_size with the user's explicit pack size
+            req["pack_size_gm"] = pack_size
         else:
-            qty_val = 1.0
+            nums = re.findall(r"[-+]?\d*\.\d+|\d+", requested_qty_str)
+            if nums:
+                qty_val = float(nums[0])
+                if "kg" in requested_qty_str:
+                    qty_val *= 1000  # Convert kg to grams
+                elif "pack" in requested_qty_str and unit_type == "gms":
+                    # "2 packs" with no size specified -> 2 * standard pack size
+                    qty_val = qty_val * units_in_pack
+                elif unit_type == "gms" and qty_val <= 10 and "g" not in requested_qty_str:
+                    # Bare small numbers like "1" or "2" for gms items are almost certainly kg
+                    qty_val *= 1000
+            else:
+                qty_val = units_in_pack  # Default to 1 standard pack
+
 
         # Calculate customized pricing vs standard pack pricing
         is_customized = False
@@ -85,11 +107,13 @@ def calculate_order_details(items_requested: List[Dict[str, Any]]):
 
         # --- Organ Meats 50% Discount Rules ---
         discount_eligibility_list = [
+            # Organ Meats
             "mutton brain", "buff brain",
             "chicken liver", "mutton liver", "buff liver", "pork liver", "duck liver",
             "mutton kidney", "buff kidney", "pork kidney",
             "mutton spleen", "buff spleen",
             "cleaned intestines", "tripe (unbleached)", "mutton lungs", "buff lungs", "buff tongue",
+            # Muscle Organs
             "chicken heart", "mutton heart", "buff heart",
             "chicken gizzard"
         ]
@@ -145,16 +169,9 @@ def check_delivery_capacity(date: str):
     Checks if there is capacity for delivery on a specific date (YYYY-MM-DD).
     The daily limit is 30 orders.
     """
-    # MOCK LOGIC for demo purposes:
-    # In a real scenario, this would call an API like GET /api/v1/orders/count?date=...
-    import random
-    # Let's say tomorrow is sometimes full, other days are mostly free
-    order_count = random.randint(15, 35)
-    
-    if order_count >= 30:
-        return {"date": date, "full": True, "count": order_count, "message": "Capacity reached for this date."}
-    else:
-        return {"date": date, "full": False, "count": order_count, "message": "Capacity available."}
+    # TODO: Replace with real API call: GET /api/v1/orders/count?date={date}
+    # For now, always return available for demo purposes.
+    return {"date": date, "full": False, "count": 12, "message": "Capacity available."}
 
 @tool
 def create_meat_order(confirm: bool = True, delivery_date: str = None):
@@ -278,96 +295,114 @@ def verify_and_confirm_payment(razorpay_payment_id: str, razorpay_order_id: str,
     except Exception as e:
         return f"❌ Error finalizing payment: {str(e)}"
 
-tools = [calculate_order_details, check_delivery_capacity, create_meat_order, get_payment_link, verify_and_confirm_payment]
+tools = [calculate_order_details, create_meat_order, get_payment_link, verify_and_confirm_payment]
 tool_node = ToolNode(tools)
 
 # --- 3. KNOWLEDGE BASE SYNC ---
 
-def load_website_knowledge():
-    """Loads additional website info like FAQs, policies, etc."""
-    kb_file = "website_knowledge.md"
-    if os.path.exists(kb_file):
-        try:
-            with open(kb_file, "r", encoding="utf-8") as f:
-                return f.read()[:5000] # Limit to 5k chars to save context
-        except:
-            pass
-    return "No additional website info available."
-
-def load_meat_knowledge():
-    """Reads product catalog from local file. (Updated by external scraper script)"""
+def get_complete_knowledge():
+    """Reads the catalog file once and returns both product data and website info."""
     cache_file = "meat_catalog.json"
-    
     if not os.path.exists(cache_file):
-        return "Catalog currently offline."
-    
+        return "Catalog offline.", "No website info available."
+        
     try:
         with open(cache_file, "r", encoding="utf-8") as f:
             products = json.load(f).get("data", [])
-            kb = "--- LIVE CATALOG ---\n"
+            if not products:
+                return "Catalog empty.", "No website info found."
+
+            import re
+            
+            # 1. Process Product Catalog
+            kb_catalog = "--- LIVE CATALOG ---\n"
             for item in products:
-                import re
-                
                 offer = item.get('offers', '')
                 offer_text = f"Offers: {offer} | " if offer else ""
-                
                 desc = item.get('shortDescription', '')
                 desc_text = f"Description: {desc} | " if desc else ""
                 
                 scraped = item.get('scraped_page_text', '')
                 if scraped:
-                    # Clean the raw scraped text by removing the repetitive website headers and footers
                     clean_scraped = re.sub(r'HOME ABOUT SHOP BUILD YOUR MEAL PLAN CONTACT Go Back.*?(?=₹|\b[A-Z])', '', scraped, flags=re.IGNORECASE)
                     clean_scraped = re.sub(r'Quantity \(in Grams\).*', '', clean_scraped, flags=re.IGNORECASE).strip()
-                    scraped_text = f"Page Features: {clean_scraped} | " 
+                    scraped_text = f"Features: {clean_scraped} | " 
                 else:
                     scraped_text = ""
                     
-                kb += (f"Item: {item.get('title')} | "
-                       f"Price: {item.get('price')} per {item.get('units_in_pack')}{item.get('unit')} | "
-                       f"{offer_text}{desc_text}{scraped_text}"
-                       f"Category: {item.get('parentCategory')}\n")
-            return kb
+                kb_catalog += (f"Item: {item.get('title')} | "
+                              f"Price: {item.get('price')} per {item.get('units_in_pack')}{item.get('unit')} | "
+                              f"{offer_text}{desc_text}{scraped_text}"
+                              f"Category: {item.get('parentCategory')}\n")
+
+            # 2. Extract Website Info (FAQs/Footer) from the first entry
+            website_kb = "No additional info found."
+            first_scraped = products[0].get("scraped_page_text", "")
+            footer_match = re.search(r"(NAVIGATE.*)", first_scraped, re.IGNORECASE | re.DOTALL)
+            if footer_match:
+                website_kb = footer_match.group(1).strip()
+            
+            return kb_catalog, website_kb
+
     except Exception as e:
-        return f"Error loading catalog: {str(e)}"
+        return f"Error loading catalog: {str(e)}", "Website info error."
 # --- 4. BUTCHER'S BUDDY BRAIN (The Agent Node) ---
 
 llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0).bind_tools(tools)
 
 def meat_story_agent(state: MessagesState):
-    catalog = load_meat_knowledge()
-    website_kb = load_website_knowledge()
+    catalog, website_kb = get_complete_knowledge()
     current_date = datetime.now().strftime("%Y-%m-%d")
     system_message = SystemMessage(content=f"""
     You are Butcher's Buddy, the VIP Concierge for 'The Meat Story'.
-    Your conversational style is "Fast & Elegant": extremely polite, hyper-efficient, and zero fluff.
-    Provide precise, concise answers without overly long conversational filler. Serve the customer quickly and confirm details immediately.
+    Your style is "Sophisticated & Proactive." You are hyper-efficient but warm. 
+    Avoid robotic repetition. Never use the exact same closing phrase twice in a row.
+
     Today's date is {current_date}.
-    CATALOG DATA:
-    {catalog}
-    ADDITIONAL WEBSITE INFO (FAQs, Policies):
-    {website_kb}
-    STRICT BUSINESS RULES:
-    1. CAPACITY: We strictly limit operations to 30 premium orders per day.
-    2. DELIVERY: We default to delivering orders on the Same-Day or Next-Day for maximum freshness. However, if a customer explicitly requests a specific preferable future date, we absolutely accept it.
+    CATALOG DATA: {catalog}
+    ADDITIONAL INFO: {website_kb}
+
+    --- THE SALESMAN'S GOLDEN RULES ---
+    1. THE "IMMEDIATE" PROMO: If a user mentions ANY Organ Meat (Kidney, Liver, etc.), your VERY FIRST response MUST include BOTH the price,how much pack the customer wants and the discount offer if any. Never make the customer ask for the price separately.
+       - Bad: "Great choice! How much would you like?or how much pack do you want? Remember the 50% discount!"
+       - Good: "Great choice! Pork Liver is ₹100 per 100g. And if you order 500g or more, you get a 50% discount — bringing it down to just ₹50/100g! How much would you like to add or how many packs do you want?"
+       - For non-organ meats, still always mention the price per pack in your first response.
+
+    2 whenver someone is asking like what options are available for the product just list the few options available for the product say many more options are available.
+
+    3. PROACTIVE UPSELLING: When suggesting "more products," be specific based on their cart. If they bought Chicken, suggest a Mutton cut or an Organ meat. 
     
-    YOUR GUIDING PRINCIPLES:
-    - If a user asks for a recommendation, suggest the best cuts based on their category.
-    - LISTING ITEMS: If a user asks for available options in a broad category (like "chicken" or "mutton"), you don't have to list every single item. List 4 to 5 popular options and ALWAYS end the sentence with "...and many more! Let me know if you are looking for a specific cut." This ensures they know our huge catalog includes other items like wings or exotic cuts!
-    - ORGAN PROMO UPSELL: Brains, Livers, Kidneys, Spleens, Intestines, Tripe, Lungs, Tongues, Hearts, and Gizzards (Chicken/Mutton/Buff/Pork/Duck) all receive a 50% DISCOUNT if the customer orders MORE THAN 500g. When a customer asks about one of these items, YOU MUST proactively upsell the deal immediately, but ONLY mention the specific item they asked about! Do NOT list the other organ meats. Example: "By the way, if you order more than 500g of Mutton Heart, you'll get a 50% discount on it!"
-    - MINIMUM ORDER & CUSTOM PACKING: The absolute minimum order is 5gms. If a user asks for a total quantity less than the standard pack size OR if they specifically request their order to be broken into smaller custom packets (e.g., "5 separate packs of 100g each"), a customized packing charge of ₹50.00 will be applied PER INDIVIDUAL PRODUCT to their final bill. Never reject these custom requests.
-    - Always provide the precise breakdown of packs and prices.
-    - Be proactive but polite about the 30-order limit.
+    4. PACK LOGIC: Understand what customers mean by "packs":
+       - "2 packs" (no size) = 2 × standard pack size (500g) = 1kg total
+       - "2 packs of 1kg" = 2 separate packages, each 1kg = 2kg total (custom, ₹50 fee applies)
+       - "1kg" = 1000g total (2 standard packs of 500g)
+       Always confirm with the customer before calculating: "Just to confirm — 2 packs of 1kg each, so 2kg total. Correct?"
+
+
+    5. ⚠️ NEVER HALLUCINATE PRICES: You MUST NEVER quote a subtotal, total, or calculated cost from memory or estimation. ONLY quote numbers that came directly from a 'calculate_order_details' tool call. If you haven't called the tool yet, do NOT say things like "that will be ₹520". Wait until the tool runs, then use those exact numbers.
+
+    --- ORDER WORKFLOW ---
+    1. SELECTION & DISCOUNT TRIGGER: Acknowledge the item. If it's an Organ/Muscle meat, lead with the 50% bulk discount offer immediately. Ask for quantity/weight or how many packs customer wants.
     
-    ORDER WORKFLOW:
-    1. QUANTITY CHECK: If the user asks for items but doesn't specify a weight/quantity, you MUST ask them how much they want of each item FIRST. Do not assume quantities.
-    2. CALCULATE: Once all quantities are locked in, use 'calculate_order_details' to calculate the exact cost.
-    3. ITEM SUMMARY: Display a completely itemized bulleted list of their cart (Product Name | Weight | Individual Price). Then, state the Subtotal, Custom Packing Fee (if any), GST (if any), and the Final Total.
-    4. CONFIRM: Ask for explicit consent on this detailed summary ("Does this look correct?").
-    5. SCHEDULE: Once confirmed, ask them if they prefer Same-Day or Next-Day delivery. If they bring up a specific future date they'd prefer, kindly accept it.
-    6. CAPACITY CHECK: ALWAYS call 'check_delivery_capacity' for their chosen date. If that day is full (>= 30 orders), suggest the next available day.
-    7. CREATE: Call 'create_meat_order' ONLY after confirming the available date.
-    8. FINALIZE: Call 'get_payment_link' and provide the Razorpay ID.
+    2. THE SALES FLOW: Once a quantity is locked, do NOT total the bill. Ask ONE short upsell question — maximum 1 sentence. No paragraphs, no long lists.
+       - Good: "Anything else to add? 🛒"
+       - Good: "Would you like to add anything else to your cart?"
+       - Good: "Shall I add anything else, or shall we wrap up?"
+       - Bad: "Before I finalize, would you be interested in other items? We have a wide variety of cuts and organ meats available. Perhaps some Mutton Ribs or Chicken Heart to complement your selection?"
+
+    3. MULTI-ITEM LOOP: Continue adding items until the user explicitly says "No," "That's all," or "Check out."
+    4. THE SUMMARY: Use 'calculate_order_details'. ALWAYS format the summary using markdown bullet points — NEVER as a single line. and always mention the weight of each pack. Example:
+       🛒 **Your Order Summary:**
+       • 🍖 Chicken Wings | 1kg (2 packs) | ₹240 | 500gm each
+       • 🥩 Buff Kidney | 2.5kg (25 packs) | ₹1,250 *(50% discount applied!)*
+
+       **Subtotal:** ₹1,490
+       **Custom Packing Fee:** ₹50 *(if applicable)*
+       **GST:** ₹9 *(if applicable)*
+       **Final Total: ₹1,549**
+       Then ask: "Does this look correct?"
+
+    5. SCHEDULING: Once the customer confirms the summary, ask for their preferred delivery date (Same-Day or Next-Day). Then call 'create_meat_order' directly -> get_payment_link.
     """)
     return {"messages": [llm.invoke([system_message] + state["messages"])]}
 

@@ -1,6 +1,6 @@
 import streamlit as st
 import json
-from agent import graph, load_meat_knowledge
+from agent import graph, get_complete_knowledge
 
 # Basic Page Config
 st.set_page_config(page_title="The Meat Story Chatbot", page_icon="🥩")
@@ -11,7 +11,7 @@ st.title("The Meat Story Assistant")
 if "messages" not in st.session_state:
     st.session_state.messages = []
     # Sync catalog on start
-    load_meat_knowledge()
+    get_complete_knowledge()
     # Basic Welcome
     st.session_state.messages.append({
         "role": "assistant", 
