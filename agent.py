@@ -92,7 +92,9 @@ def calculate_order_details(items_requested: List[Dict[str, Any]]):
         requested_pack_size = req.get("pack_size_gm")
         
         if unit_type == "gms":
-            packs = qty_val / units_in_pack
+            price_ratio = qty_val / units_in_pack  # Used for price calculation (prorated)
+            import math
+            packs = math.ceil(price_ratio)  # Always whole number — you can't give 0.086 of a pack
             # Enforce minimum order of 5g
             if qty_val < 5:
                 results.append({"error": f"Minimum order is 5g. You requested {qty_val}g of {item.get('title')}. Please order at least 5g."})
@@ -104,11 +106,12 @@ def calculate_order_details(items_requested: List[Dict[str, Any]]):
                 is_customized = True
         else:
             # Pieces (Quail, Rabbit, etc)
-            packs = qty_val
+            price_ratio = qty_val
+            packs = int(qty_val) if qty_val >= 1 else 1
             if qty_val < 1:
                 is_customized = True
 
-        item_total = packs * price_per_pack
+        item_total = price_ratio * price_per_pack  # Price based on actual grams, not rounded packs
 
         # --- Organ Meats 50% Discount Rules ---
         discount_eligibility_list = [
@@ -137,8 +140,15 @@ def calculate_order_details(items_requested: List[Dict[str, Any]]):
             "itemId": item.get("_id"),
             "itemTitle": item.get("title"),
             "itemPrice": price_per_pack,
-            "quantity": qty_val, 
+            "quantity": qty_val,
             "packs": packs,
+            # Human-readable: for custom orders show actual pack count × individual size, for standard orders show standard pack size
+            "packsDisplay": (
+                f"{max(1, round(qty_val / float(requested_pack_size)))} pack{'s' if round(qty_val / float(requested_pack_size)) != 1 else ''} of {int(float(requested_pack_size))}g each"
+                if (is_customized and requested_pack_size)
+                else f"1 pack of {int(qty_val)}g" if is_customized
+                else f"{packs} pack{'s' if packs != 1 else ''} of {int(units_in_pack)}g each"
+            ),
             "unitsInPack": units_in_pack,
             "unit": unit_type,
             "parentCategory": item.get("parentCategory", "Protiens"),
@@ -371,15 +381,15 @@ def meat_story_agent(state: MessagesState):
     1. THE "IMMEDIATE" PROMO: If a user mentions ANY Organ Meat (Kidney, Liver, etc.), your VERY FIRST response MUST include BOTH the price,how much pack the customer wants and the discount offer if any. Never make the customer ask for the price separately.
        - Bad: "Great choice! How much would you like?or how much pack do you want? Remember the 50% discount!"
        - Good: "Great choice! Pork Liver is ₹100 per 100g. And if you order 500g or more, you get a 50% discount — bringing it down to just ₹50/100g! How much would you like to add or how many packs do you want?"
-       - For non-organ meats, still always mention the price per pack in your first response.
+       - For non-organ meats, still always mention the price per pack in your first response. and ask how much pack they want.
 
     2 whenver someone is asking like what options are available for the product just list the few options available for the product say many more options are available.
 
     3. PROACTIVE UPSELLING: When suggesting "more products," be specific based on their cart. If they bought Chicken, suggest a Mutton cut or an Organ meat. 
     
     4. PACK LOGIC: Understand what customers mean by "packs":
-       - "2 packs" (no size) = 2 × standard pack size (500g) = 1kg total
-       - "2 packs of 1kg" = 2 separate packages, each 1kg = 2kg total (custom, ₹50 fee applies)
+       - "2 packs" (no size) = 2 × standard pack size (500g) = 1kg total , always ask for confirmation.
+       - "2 packs of 1kg" = 2 separate packages, each 1kg = 2kg total custom fees if the order is less than standard packaging 
        - "1kg" = 1000g total (2 standard packs of 500g)
        Always confirm with the customer before calculating: "Just to confirm — 2 packs of 1kg each, so 2kg total. Correct?"
 
@@ -391,30 +401,61 @@ def meat_story_agent(state: MessagesState):
        - If a customer asks for LESS than the standard pack size (e.g. 50g when standard is 500g), ALWAYS accept it. Inform them: "A Custom Packing Fee of ₹50 + 18% GST (₹9) = ₹59 total will be added."
        - NEVER say "I don't have that option" or "that size is not available" for any quantity >= 5g.
        - Bad: "I don't have an option for 50gm. The pack is 500gm."
-       - Good: "Absolutely! 50g of Chicken Wings is possible. Since it's less than our standard 500g pack, a custom packing fee of ₹50 + ₹9 GST applies. Shall I add it to your cart?"
+       - Good: "Absolutely! 50g of Chicken Wings is possible. Since it's less than our standard 500g pack, a custom packing fee of ₹50 + ₹9 GST applies. how many packs you want to add to your cart?"
 
     --- ORDER WORKFLOW ---
-    1. SELECTION & DISCOUNT TRIGGER: Acknowledge the item. If it's an Organ/Muscle meat, lead with the 50% bulk discount offer immediately. Ask for quantity/weight or how many packs customer wants.
-    
-    2. THE SALES FLOW: Once a quantity is locked, do NOT total the bill. Ask ONE short upsell question — maximum 1 sentence. No paragraphs, no long lists.
+    1. SELECTION & DISCOUNT TRIGGER: Acknowledge the item. If it's an Organ/Muscle meat, lead with the 50% bulk discount offer immediately.
+       Then ALWAYS ask: "How many grams (or how many packs) would you like?"
+       - Never assume a quantity. Always ask this question first.
+
+    2. CONFIRM PACKS (ALWAYS — NO EXCEPTIONS — THIS IS THE MOST CRITICAL RULE):
+       - ⚠️ WHENEVER the customer mentions ANY gram/kg quantity, you MUST ALWAYS ask:
+         "How many packs of [Xg] would you like?"
+         NEVER assume 1 pack. NEVER skip this. NEVER proceed to calculate without this answer.
+       
+       - If the customer gives GRAMS (e.g., "500g", "200g", "1kg"):
+         → ALWAYS respond: "Got it! How many packs of [Xg] would you like?"
+         Example: Customer says "500g" → Agent says: "How many packs of 500g would you like — 1 pack, 2 packs, or more?"
+         Example: Customer says "200g" → Agent says: "How many packs of 200g would you like?
+           Also, just so you know — our standard pack is 500g. If you go for 500g packs, the custom packing fee of ₹59 won't apply. Shall I keep it as 200g packs or switch to 500g?"
+         Example: Customer says "1kg" → Agent says: "How many packs of 1kg would you like — 1 pack, 2 packs, or more?"
+       
+       - If the customer gives PACKS with no size (e.g., "2 packs"):
+         → Confirm the size: "That's 2 packs of our standard 500g each (1kg total). Correct?"
+       
+       - If the customer gives PACKS with a size (e.g., "3 packs of 200g"):
+         → Confirm: "3 packs of 200g each (600g total). Correct? Note: since 200g is less than our standard 500g pack, a custom packing fee of ₹50 + ₹9 GST applies per custom item."
+       
+       - NEVER skip this step. NEVER call calculate_order_details until you have BOTH the pack size AND the number of packs confirmed by the customer.
+
+    3. MORE ITEMS?: After confirmation, ask ONE short question:
+       "Would you like to add anything else to your order?"
+       
        - Good: "Anything else to add? 🛒"
        - Good: "Would you like to add anything else to your cart?"
        - Good: "Shall I add anything else, or shall we wrap up?"
-       - Bad: "Before I finalize, would you be interested in other items? We have a wide variety of cuts and organ meats available. Perhaps some Mutton Ribs or Chicken Heart to complement your selection?"
+       - Good: "Before I finalize, would you be interested in other items? We have a wide variety of cuts and organ meats available. Perhaps some Mutton Ribs or Chicken Heart to complement your selection?"
+       - If YES → repeat steps 1 & 2 for the new item.  
+       - If NO → go to step 4.
 
-    3. MULTI-ITEM LOOP: Continue adding items until the user explicitly says "No," "That's all," or "Check out."
-    4. THE SUMMARY: Use 'calculate_order_details'. ALWAYS format the summary using markdown bullet points — NEVER as a single line. and always mention the weight of each pack. Example:
+    4. THE SUMMARY: Use 'calculate_order_details'. ALWAYS format the summary using markdown bullet points — NEVER as a single line.
+       Use the 'packsDisplay' field from the tool result for each item's quantity — NEVER calculate packs yourself.
+       Each price line MUST be on its own separate line. Example:
+
        🛒 **Your Order Summary:**
-       • 🍖 Chicken Wings | 1kg (2 packs) | ₹240 | 500gm each
-       • 🥩 Buff Kidney | 2.5kg (25 packs) | ₹1,250 *(50% discount applied!)*
+       • 🍖 Chicken Wings | 6 packs of 50gm each | ₹72
+       • 🥩 Mutton Ribs | 2 packs of 500gm each | ₹900  
 
-       **Subtotal:** ₹1,490
-       **Custom Packing Fee:** ₹50 *(if applicable)*
-       **GST:** ₹9 *(if applicable)*
-       **Final Total: ₹1,549**
-       Then ask: "Does this look correct?"
+       **Subtotal:** ₹972
+       **Custom Packing Fee:** ₹50(if applicable)
+       **GST:** ₹9(if applicable)
+       **Final Total: ₹1,031**
 
-    5. SCHEDULING: Once the customer confirms the summary, ask for their preferred delivery date (Same-Day or Next-Day). Then call 'create_meat_order' directly -> get_payment_link.
+       Does this look correct?
+
+    5. SCHEDULING: Once confirmed, ask: "Would you prefer Same-Day or Next-Day delivery?"
+       Then call 'create_meat_order' → get_payment_link.
+
     """)
     return {"messages": [llm.invoke([system_message] + state["messages"])]}
 
